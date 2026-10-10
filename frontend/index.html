@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D Particle Form Studio</title>
+  <style>
+    *{box-sizing:border-box} html,body,#app{margin:0;width:100%;height:100%;overflow:hidden}
+    body{font-family:Inter,Segoe UI,Arial,sans-serif;background:#020611;color:#eaf6ff}
+    #app{display:grid;grid-template-columns:320px 1fr;gap:14px;padding:14px}
+    .panel{border:1px solid #15365f;border-radius:20px;background:linear-gradient(160deg,#07111f,#030813);box-shadow:0 0 50px #006eff18}
+    aside{padding:20px;overflow:auto}
+    h1{font-size:23px;margin:0;background:linear-gradient(90deg,#60e9ff,#7785ff,#d85cff);-webkit-background-clip:text;color:transparent}
+    .sub{font-size:12px;color:#6e89aa;line-height:1.5;margin:7px 0 22px}
+    label{display:block;font-size:11px;color:#7f9abb;margin:15px 0 7px}
+    .inputrow{display:flex;gap:8px}
+    input[type=text]{width:100%;background:#030a16;border:1px solid #245181;border-radius:11px;color:white;padding:13px;font-size:16px;outline:none}
+    input[type=text]:focus{border-color:#59bfff;box-shadow:0 0 22px #168dff2b}
+    button{border:0;border-radius:10px;color:#fff;font-weight:800;cursor:pointer;padding:11px 13px;background:linear-gradient(135deg,#406cff,#873fff)}
+    button.secondary{background:#10233e;color:#a9c9e9}
+    input[type=range]{width:100%;accent-color:#5b8cff}
+    .value{float:right;color:#9acaff}
+    .chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:16px}
+    .chip{padding:7px 9px;background:#071326;border:1px solid #163458;border-radius:9px;color:#89a7c9;font-size:10px;cursor:pointer}
+    .chip:hover{border-color:#3c8bdb;color:white}
+    .status{margin-top:18px;padding:12px;background:#06101f;border-radius:11px;color:#7d9bbb;font-size:11px}
+    .status b{color:#69e9ff}
+    main{position:relative;min-width:0;overflow:hidden}
+    #stage{position:absolute;inset:0;border-radius:20px;overflow:hidden}
+    canvas{width:100%;height:100%;display:block}
+    .hud{position:absolute;top:18px;left:20px;pointer-events:none}
+    .hud .title{font-size:13px;font-weight:900;letter-spacing:.08em}
+    .hud .hint{font-size:10px;color:#6484a8;margin-top:5px}
+    .count{position:absolute;right:20px;bottom:18px;color:#55769c;font-size:10px;pointer-events:none}
+    @media(max-width:800px){#app{grid-template-columns:1fr;grid-template-rows:auto 1fr;overflow:auto}aside{max-height:370px}main{min-height:600px}}
+  </style>
+</head>
+<body>
+<div id="app">
+  <aside class="panel">
+    <h1>✦ 3D PARTICLE FORM STUDIO</h1>
+    <div class="sub">Type a letter, word, emoji, or supported 3D object. Dots scatter and assemble into the target.</div>
+
+    <div class="inputrow">
+      <input id="prompt" type="text" value="CAR" placeholder="CAR, A, HELLO, ❤️..." />
+      <button id="formBtn">FORM</button>
+    </div>
+
+    <label>Particles <span class="value" id="countValue">18,000</span></label>
+    <input id="count" type="range" min="3000" max="40000" step="1000" value="18000">
+
+    <label>Formation time <span class="value" id="speedValue">2.2s</span></label>
+    <input id="speed" type="range" min=".5" max="5" step=".1" value="2.2">
+
+    <label>Dot size <span class="value" id="sizeValue">0.045</span></label>
+    <input id="size" type="range" min=".015" max=".11" step=".005" value=".045">
+
+    <div class="chips">
+      <div class="chip">A</div><div class="chip">HELLO</div><div class="chip">❤️</div>
+      <div class="chip">🔥</div><div class="chip">CAR</div><div class="chip">HEART</div>
+      <div class="chip">STAR</div><div class="chip">SPHERE</div><div class="chip">TORUS</div>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button id="scatterBtn" class="secondary">SCATTER</button>
+      <button id="resetBtn" class="secondary">RESET VIEW</button>
+    </div>
+
+    <div class="status">Status: <b id="status">Loading engine…</b></div>
+    <div class="sub" style="margin-top:15px">Drag the viewport to rotate. Scroll to zoom. Known 3D objects are generated as actual 3D point clouds; other text/emoji is rasterized into colored particles.</div>
+  </aside>
+
+  <main class="panel">
+    <div id="stage"></div>
+    <div class="hud"><div class="title">LIVE 3D PARTICLE OUTPUT</div><div class="hint">DRAG • ROTATE • SCROLL • ZOOM</div></div>
+    <div class="count" id="hudCount"></div>
+  </main>
+</div>
+
+<script type="module">
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js";
+
+const stage = document.getElementById("stage");
+const promptEl = document.getElementById("prompt");
+const statusEl = document.getElementById("status");
+const countEl = document.getElementById("count");
+const speedEl = document.getElementById("speed");
+const sizeEl = document.getElementById("size");
+const countValue = document.getElementById("countValue");
+const speedValue = document.getElementById("speedValue");
+const sizeValue = document.getElementById("sizeValue");
+const hudCount = document.getElementById("hudCount");
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x01040b);
+scene.fog = new THREE.FogExp2(0x01040b, 0.025);
+
+const camera = new THREE.PerspectiveCamera(48, 1, .1, 100);
+camera.position.set(0, 1, 15);
+
+const renderer = new THREE.WebGLRenderer({antialias:true,powerPreference:"high-performance"});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+stage.appendChild(renderer.domElement);
+
+const group = new THREE.Group();
+scene.add(group);
+
+const floor = new THREE.GridHelper(30,30,0x10325b,0x071629);
+floor.position.y=-4.2;
+floor.material.transparent=true;
+floor.material.opacity=.25;
+scene.add(floor);
+
+const starsGeo = new THREE.BufferGeometry();
+const stars = new Float32Array(1200*3);
+for(let i=0;i<1200;i++){
+  stars[i*3]=(Math.random()-.5)*45;
+  stars[i*3+1]=(Math.random()-.5)*28;
+  stars[i*3+2]=(Math.random()-.5)*35;
+}
+starsGeo.setAttribute("position",new THREE.BufferAttribute(stars,3));
+scene.add(new THREE.Points(starsGeo,new THREE.PointsMaterial({size:.025,color:0x245ea0,transparent:true,opacity:.5})));
+
+let N=18000, duration=2.2, dotSize=.045;
+let geo, pts, pos, start, target, color;
+let animationStart=0, animating=false;
+let currentName="CAR";
+
+function rand(a,b){return a+Math.random()*(b-a)}
+function rgb(r,g,b){return {r,g,b}}
+function cloudPoint(radius=11){
+  const u=rand(-1,1), a=rand(0,Math.PI*2), r=rand(radius*.55,radius);
+  const s=Math.sqrt(1-u*u);
+  return {x:r*s*Math.cos(a),y:r*u,z:r*s*Math.sin(a)};
+}
+function push(arr,x,y,z,c){arr.push({x,y,z,r:c.r,g:c.g,b:c.b})}
+
+function textCloud(text){
+  const c=document.createElement("canvas"); c.width=1200;c.height=650;
+  const x=c.getContext("2d",{willReadFrequently:true});
+  const emoji=/[\u{1F000}-\u{1FAFF}\u2764\uFE0F]/u.test(text);
+  let fs=emoji?430:Math.min(320,Math.max(80,800/Math.max(text.length,1)));
+  x.font=emoji?`${fs}px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif`:`900 ${fs}px Arial`;
+  x.textAlign="center";x.textBaseline="middle";x.fillStyle="white";
+  x.fillText(text,600,325);
+  const im=x.getImageData(0,0,c.width,c.height).data, out=[];
+  for(let py=0;py<c.height;py+=4)for(let px=0;px<c.width;px+=4){
+    const k=(py*c.width+px)*4;
+    if(im[k+3]>70){
+      let R=im[k]/255,G=im[k+1]/255,B=im[k+2]/255;
+      if(text.includes("❤")){R=1;G=.02;B=.05}
+      if(text.includes("🔥")){R=1;G=rand(.12,.55);B=.01}
+      push(out,(px-600)/78,-(py-325)/78,rand(-.5,.5),rgb(R,G,B));
+    }
+  }
+  return out;
+}
+
+function sphereCloud(){
+  const out=[];
+  for(let i=0;i<50000;i++){
+    const u=rand(-1,1),a=rand(0,Math.PI*2),r=3.5,s=Math.sqrt(1-u*u);
+    push(out,r*s*Math.cos(a),r*u,r*s*Math.sin(a),rgb(.45,.08,1));
+  }
+  return out;
+}
+
+function torusCloud(){
+  const out=[];
+  for(let i=0;i<50000;i++){
+    const u=rand(0,Math.PI*2),v=rand(0,Math.PI*2),R=3,r=1.15;
+    push(out,(R+r*Math.cos(v))*Math.cos(u),r*Math.sin(v),(R+r*Math.cos(v))*Math.sin(u),rgb(.05,.8,1));
+  }
+  return out;
+}
+
+function heartCloud(){
+  const out=[];
+  for(let i=0;i<50000;i++){
+    const t=rand(0,Math.PI*2),s=Math.sqrt(Math.random());
+    const x=16*Math.sin(t)**3;
+    const y=13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t);
+    push(out,x*s/5,y*s/5,rand(-.75,.75),rgb(1,.01,.04));
+  }
+  return out;
+}
+
+function starCloud(){
+  const out=[];
+  const verts=[];
+  for(let i=0;i<10;i++){
+    const a=-Math.PI/2+i*Math.PI/5, r=i%2===0?4.2:1.75;
+    verts.push([Math.cos(a)*r,Math.sin(a)*r]);
+  }
+  for(let i=0;i<50000;i++){
+    const tri=Math.floor(rand(0,10));
+    const A=verts[tri],B=verts[(tri+1)%10];
+    let u=Math.random(),v=Math.random();
+    if(u+v>1){u=1-u;v=1-v}
+    push(out,A[0]*u+B[0]*v,A[1]*u+B[1]*v,rand(-.45,.45),rgb(1,.55,.01));
+  }
+  return out;
+}
+
+function wheel(out,cx,cz){
+  for(let i=0;i<6000;i++){
+    const a=rand(0,Math.PI*2),rad=rand(.58,1.0);
+    push(out,cx+rand(-.16,.16),-1.35+Math.cos(a)*rad,cz+Math.sin(a)*rad,rgb(.015,.02,.03));
+  }
+  for(let i=0;i<1800;i++){
+    const a=rand(0,Math.PI*2),rad=Math.sqrt(Math.random())*.43;
+    push(out,cx+rand(-.18,.18),-1.35+Math.cos(a)*rad,cz+Math.sin(a)*rad,rgb(.4,.48,.58));
+  }
+}
+
+function carCloud(){
+  const out=[];
+  // Lower sculpted body
+  for(let i=0;i<85000;i++){
+    const x=rand(-5.2,5.2), y=rand(-1.35,1.0), z=rand(-1.5,1.5);
+    const nose=5.25-.35*Math.pow(Math.abs(y),2);
+    if(Math.abs(x)<nose){
+      const edge=Math.max(Math.abs(z)/1.5,Math.abs(y)/1.35);
+      const c=edge>.83?rgb(.08,.7,1):rgb(.025,.22,.95);
+      push(out,x,y,z,c);
+    }
+  }
+  // Cabin / roof
+  for(let i=0;i<40000;i++){
+    const y=rand(.5,2.55), x=rand(-3.1,3.1), z=rand(-1.3,1.3);
+    const allowed=3.05-(y-.5)*.95;
+    if(Math.abs(x)<allowed){
+      let c=rgb(.03,.32,.95);
+      if(Math.abs(z)>1.18 && y>1.0)c=rgb(.01,.06,.14);
+      push(out,x,y,z,c);
+    }
+  }
+  // Windows emphasized
+  for(let i=0;i<10000;i++){
+    const side=Math.random()<.5?-1:1, y=rand(1.05,2.22), x=rand(-2.35,2.35);
+    if(Math.abs(x)<2.65-(y-1)*.8) push(out,x,y,side*1.34,rgb(.01,.05,.11));
+  }
+  wheel(out,-3.25,0); wheel(out,3.25,0);
+  // headlights and tail lights
+  for(let i=0;i<1800;i++){
+    push(out,-5.18+rand(-.12,.12),rand(-.25,.35),rand(-1.2,1.2),rgb(.8,.95,1));
+    push(out, 5.18+rand(-.12,.12),rand(-.45,.25),rand(-1.2,1.2),rgb(1,.01,.02));
+  }
+  return out;
+}
+
+function chooseCloud(name){
+  const k=name.trim().toLowerCase();
+  if(k==="car")return carCloud();
+  if(k==="sphere")return sphereCloud();
+  if(k==="torus")return torusCloud();
+  if(k==="heart")return heartCloud();
+  if(k==="star")return starCloud();
+  return textCloud(name);
+}
+
+function createSystem(){
+  if(pts){group.remove(pts);geo.dispose();pts.material.dispose()}
+  pos=new Float32Array(N*3);start=new Float32Array(N*3);target=new Float32Array(N*3);color=new Float32Array(N*3);
+  for(let i=0;i<N;i++){
+    const p=cloudPoint(),k=i*3;
+    pos[k]=start[k]=p.x;pos[k+1]=start[k+1]=p.y;pos[k+2]=start[k+2]=p.z;
+    color[k]=.15;color[k+1]=.55;color[k+2]=1;
+  }
+  geo=new THREE.BufferGeometry();
+  geo.setAttribute("position",new THREE.BufferAttribute(pos,3));
+  geo.setAttribute("color",new THREE.BufferAttribute(color,3));
+  const mat=new THREE.PointsMaterial({
+    size:dotSize,vertexColors:true,transparent:true,opacity:.95,
+    depthWrite:false,blending:THREE.AdditiveBlending,sizeAttenuation:true
+  });
+  pts=new THREE.Points(geo,mat);group.add(pts);
+  hudCount.textContent=`${N.toLocaleString()} LIVE PARTICLES`;
+}
+
+function loadTarget(name){
+  const cloud=chooseCloud(name);
+  if(!cloud.length) return;
+  for(let i=0;i<N;i++){
+    const p=cloud[Math.floor(Math.random()*cloud.length)],k=i*3;
+    target[k]=p.x+rand(-.015,.015);target[k+1]=p.y+rand(-.015,.015);target[k+2]=p.z+rand(-.015,.015);
+    color[k]=p.r;color[k+1]=p.g;color[k+2]=p.b;
+  }
+  geo.attributes.color.needsUpdate=true;
+}
+
+function form(name){
+  name=(name||"A").trim(); currentName=name;
+  for(let i=0;i<pos.length;i++)start[i]=pos[i];
+  loadTarget(name);
+  animationStart=performance.now();animating=true;
+  statusEl.textContent=`Forming "${name}"…`;
+}
+
+function scatter(){
+  for(let i=0;i<N;i++){
+    const p=cloudPoint(),k=i*3;
+    start[k]=pos[k];start[k+1]=pos[k+1];start[k+2]=pos[k+2];
+    target[k]=p.x;target[k+1]=p.y;target[k+2]=p.z;
+  }
+  animationStart=performance.now();animating=true;
+  statusEl.textContent="Scattering…";
+}
+
+function ease(t){return t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2}
+
+let drag=false,lx=0,ly=0,rx=0,ry=0,trx=0,try_=0;
+stage.addEventListener("pointerdown",e=>{drag=true;lx=e.clientX;ly=e.clientY;stage.setPointerCapture(e.pointerId)});
+stage.addEventListener("pointermove",e=>{
+  if(!drag)return; try_+=(e.clientX-lx)*.006;trx+=(e.clientY-ly)*.006;trx=Math.max(-1.3,Math.min(1.3,trx));lx=e.clientX;ly=e.clientY;
+});
+stage.addEventListener("pointerup",()=>drag=false);
+stage.addEventListener("pointercancel",()=>drag=false);
+stage.addEventListener("wheel",e=>{e.preventDefault();camera.position.z=Math.max(7,Math.min(28,camera.position.z+e.deltaY*.009))},{passive:false});
+
+function resize(){
+  const w=Math.max(1,stage.clientWidth),h=Math.max(1,stage.clientHeight);
+  renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();
+}
+window.addEventListener("resize",resize);
+
+function loop(){
+  requestAnimationFrame(loop);
+  if(animating){
+    let t=Math.min(1,(performance.now()-animationStart)/(duration*1000)),e=ease(t);
+    for(let i=0;i<pos.length;i++)pos[i]=start[i]+(target[i]-start[i])*e;
+    geo.attributes.position.needsUpdate=true;
+    if(t>=1){animating=false;statusEl.textContent=`"${currentName}" ready ✦`}
+  }
+  if(!drag)try_+=.0011;
+  rx+=(trx-rx)*.075;ry+=(try_-ry)*.075;
+  group.rotation.x=rx;group.rotation.y=ry;
+  renderer.render(scene,camera);
+}
+
+document.getElementById("formBtn").onclick=()=>form(promptEl.value);
+document.getElementById("scatterBtn").onclick=scatter;
+document.getElementById("resetBtn").onclick=()=>{camera.position.set(0,1,15);trx=try_=0};
+promptEl.addEventListener("keydown",e=>{if(e.key==="Enter")form(promptEl.value)});
+document.querySelectorAll(".chip").forEach(x=>x.onclick=()=>{promptEl.value=x.textContent;form(x.textContent)});
+
+countEl.oninput=()=>countValue.textContent=Number(countEl.value).toLocaleString();
+countEl.onchange=()=>{N=Number(countEl.value);createSystem();form(currentName)};
+speedEl.oninput=()=>{duration=Number(speedEl.value);speedValue.textContent=duration.toFixed(1)+"s"};
+sizeEl.oninput=()=>{dotSize=Number(sizeEl.value);sizeValue.textContent=dotSize.toFixed(3);if(pts)pts.material.size=dotSize};
+
+resize();createSystem();form("CAR");loop();
+</script>
+</body>
+</html>
